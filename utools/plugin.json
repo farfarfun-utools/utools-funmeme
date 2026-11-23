@@ -1,0 +1,167 @@
+{
+  "pluginName": "趣图生花",
+  "version": "0.1.0",
+  "description": "趣图生花 FunMeme：表情包制作、斗图检索、文字大字报与 Emoji/颜文字工作室，支持离线内置梗图模板、按需联网搜图、一键加字加贴纸与复制到剪贴板",
+  "author": "farfarfun",
+  "main": "dist/index.html",
+  "preload": "preload.js",
+  "logo": "logo.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 720
+  },
+  "platform": [
+    "darwin",
+    "win32",
+    "linux"
+  ],
+  "features": [
+    {
+      "code": "funmeme",
+      "explain": "打开趣图生花表情包与斗图工作室",
+      "cmds": [
+        "趣图生花",
+        "FunMeme",
+        "表情包",
+        "斗图",
+        "梗图"
+      ]
+    },
+    {
+      "code": "meme-make",
+      "explain": "快速制作文字表情包或大字报梗图",
+      "cmds": [
+        "表情制作",
+        "文字表情",
+        "大字报",
+        "做表情"
+      ]
+    },
+    {
+      "code": "meme-emoji",
+      "explain": "检索并复制 Emoji 表情、大号贴纸图与颜文字",
+      "cmds": [
+        "颜文字",
+        "emoji",
+        "表情符号"
+      ]
+    },
+    {
+      "code": "meme-files",
+      "explain": "将本地图片导入趣图生花快速加字做表情",
+      "cmds": [
+        {
+          "type": "files",
+          "label": "用趣图生花加字做表情",
+          "fileType": "file",
+          "match": "/\\.(png|jpe?g|webp|gif|bmp)$/i",
+          "minLength": 1,
+          "maxLength": 1
+        }
+      ]
+    },
+    {
+      "code": "meme-over",
+      "explain": "将选中文字一键生成大字报文字表情包",
+      "cmds": [
+        {
+          "type": "over",
+          "label": "生成文字表情包",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      ]
+    }
+  ],
+  "tools": {
+    "search_emoji_kaomoji": {
+      "description": "离线按关键词或分类检索内置 Emoji 与颜文字库，返回表情符号、名称、分类与匹配关键词。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "检索关键词（中英文皆可），如 摸鱼、笑哭、点赞、cat、shrug"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "all",
+              "emoji",
+              "kaomoji"
+            ],
+            "description": "类型筛选：all（默认）、emoji 或 kaomoji"
+          },
+          "category": {
+            "type": "string",
+            "description": "可选分类 ID，如 faces、work、happy、shock 等"
+          },
+          "limit": {
+            "type": "number",
+            "description": "最多返回条数，范围 1–50，默认 12"
+          }
+        }
+      }
+    },
+    "list_meme_templates": {
+      "description": "离线列出趣图生花内置的 10 款矢量手绘梗图模板（含模板 ID、中英文名、分类与默认配文），方便挑选模板。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "可选分类筛选，如 work、reaction、panda、tech、all"
+          }
+        }
+      }
+    },
+    "build_text_meme_config": {
+      "description": "离线校验并生成标准化的文字表情包配置（样式、文案、字号、配色、画布尺寸），可直接用于 FunMeme 文字表情渲染。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "表情包文案（1–120 字，支持换行）"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "big-black",
+              "big-white",
+              "panda-board",
+              "wechat-bubble",
+              "red-gold",
+              "cyber-neon",
+              "sticky-note",
+              "terminal-err"
+            ],
+            "description": "文字表情风格 ID，默认 big-black"
+          },
+          "fontSize": {
+            "type": "number",
+            "description": "字号（24–96 px）"
+          },
+          "textColor": {
+            "type": "string",
+            "description": "可选自定义文字 HEX 色值，如 #FFFFFF"
+          },
+          "bgColor": {
+            "type": "string",
+            "description": "可选自定义背景 HEX 色值，如 #111827"
+          },
+          "size": {
+            "type": "number",
+            "description": "输出正方形画布边长（256–1024 px），默认 512"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  }
+}
