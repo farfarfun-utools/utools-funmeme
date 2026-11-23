@@ -123,6 +123,11 @@ async function handleOnlineFetch() {
   }
 }
 
+function clearSearch() {
+  searchQuery.value = ''
+  errorMsg.value = ''
+}
+
 function handleSearchSubmit() {
   if (source.value !== 'offline') {
     void handleOnlineFetch()
@@ -156,15 +161,19 @@ function handleSendToMaker(card: MemeFeedItem) {
           v-model="searchQuery"
           type="text"
           class="input search-input"
+          data-testid="discover-search-input"
           :placeholder="t(locale, 'discover.searchPlaceholder')"
           @keydown.enter="handleSearchSubmit"
+          @keydown.escape="clearSearch"
         />
         <button
           v-if="searchQuery"
           type="button"
           class="clear-btn"
-          aria-label="Clear search"
-          @click="searchQuery = ''"
+          data-testid="discover-search-clear"
+          :aria-label="locale === 'en' ? 'Clear search' : '清空搜索'"
+          :title="locale === 'en' ? 'Clear' : '清空'"
+          @click="clearSearch"
         >
           <AppIcon name="x" :size="13" />
         </button>
@@ -174,6 +183,7 @@ function handleSendToMaker(card: MemeFeedItem) {
         <select
           v-model="source"
           class="select source-select"
+          data-testid="discover-source-select"
           aria-label="Meme Source"
           @change="handleSourceChange"
         >
@@ -191,7 +201,7 @@ function handleSendToMaker(card: MemeFeedItem) {
           data-testid="discover-fetch-btn"
           @click="handleOnlineFetch"
         >
-          <AppIcon :name="loading ? 'refresh-cw' : 'globe'" :size="13" />
+          <AppIcon :name="loading ? 'refresh-cw' : 'globe'" :size="13" :class="{ 'is-spinning': loading }" />
           <span>{{ loading ? t(locale, 'discover.fetching') : t(locale, 'discover.fetchBtn') }}</span>
         </button>
       </div>
@@ -217,6 +227,9 @@ function handleSendToMaker(card: MemeFeedItem) {
       >
         #{{ tag }}
       </button>
+      <span v-if="displayCards.length > 0" class="count-badge mono">
+        {{ displayCards.length }}
+      </span>
     </div>
 
     <!-- Online Prompts / Error Banner -->
@@ -303,7 +316,15 @@ function handleSendToMaker(card: MemeFeedItem) {
 
     <div v-else-if="source === 'offline' || hasFetchedOnline" class="empty-box card">
       <AppIcon name="smile" :size="28" class="empty-icon" />
-      <p>{{ t(locale, 'discover.empty') }}</p>
+      <p class="empty-msg">{{ t(locale, 'discover.empty') }}</p>
+      <div class="empty-actions">
+        <button v-if="searchQuery || activeTag !== 'all'" type="button" class="btn btn-sm" @click="searchQuery = ''; activeTag = 'all'">
+          {{ locale === 'en' ? 'Reset Filters' : '重置筛选' }}
+        </button>
+        <button v-if="source !== 'offline'" type="button" class="btn btn-sm btn-primary" @click="source = 'offline'; handleSourceChange()">
+          {{ t(locale, 'discover.source.offline') }}
+        </button>
+      </div>
     </div>
   </section>
 </template>
@@ -349,10 +370,27 @@ function handleSendToMaker(card: MemeFeedItem) {
 
 .clear-btn {
   position: absolute;
-  right: 7px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   color: var(--text-muted);
   display: inline-flex;
-  padding: 2px;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.14s, color 0.14s;
+}
+
+.clear-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.count-badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 4px;
 }
 
 .source-controls {
@@ -511,6 +549,17 @@ function handleSendToMaker(card: MemeFeedItem) {
 
 .empty-icon {
   color: var(--accent);
+}
+
+.empty-msg {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 560px) {

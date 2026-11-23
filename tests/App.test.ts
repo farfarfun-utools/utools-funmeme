@@ -66,4 +66,21 @@ describe('FunMeme App UI', () => {
 
     wrapper.unmount()
   })
+
+  it('filters offline discover memes and clears search with clear button without external network calls', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const wrapper = mount(App)
+    const input = wrapper.find('[data-testid="discover-search-input"]')
+    await input.setValue('猫猫')
+    expect(wrapper.findAll('.meme-card').length).toBeGreaterThanOrEqual(1)
+    expect(wrapper.find('[data-testid="discover-search-clear"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="discover-search-clear"]').trigger('click')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect(wrapper.findAll('.meme-card').length).toBe(12)
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    fetchSpy.mockRestore()
+    wrapper.unmount()
+  })
 })

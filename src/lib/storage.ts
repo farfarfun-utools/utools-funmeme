@@ -98,35 +98,64 @@ export function loadStudioState(): FunMemeState {
   }
 }
 
-export function saveStudioState(state: FunMemeState): void {
-  if (typeof window === 'undefined' || !window.localStorage) return
+export interface SaveStateResult {
+  ok: boolean
+  trimmed: boolean
+  keptFavorites?: SavedMemeItem[]
+  reason?: 'quota' | 'unavailable'
+}
+
+export function sanitizeExportFilename(raw: string, fallback = 'funmeme'): string {
+  const noCtrl = Array.from(String(raw || ''))
+    .filter((ch) => ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) !== 127)
+    .join('')
+  const stripped = noCtrl
+    .replace(/\.png$/i, '')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 64)
+  const base = stripped || fallback
+  return `${base}.png`
+}
+
+export function saveStudioState(state: FunMemeState): SaveStateResult {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return { ok: false, trimmed: false, reason: 'unavailable' }
+  }
+  const basePayload: FunMemeState = {
+    version: 1,
+    activeView: state.activeView,
+    favorites: state.favorites.slice(0, MAX_SAVED_MEMES),
+    apiSettings: {
+      giphyApiKey: state.apiSettings.giphyApiKey.trim().slice(0, 128),
+      tenorApiKey: state.apiSettings.tenorApiKey.trim().slice(0, 128),
+      customApiUrl: state.apiSettings.customApiUrl.trim().slice(0, 512),
+    },
+    settings: {
+      theme: state.settings.theme,
+      locale: state.settings.locale,
+    },
+  }
   try {
-    const payload: FunMemeState = {
-      version: 1,
-      activeView: state.activeView,
-      favorites: state.favorites.slice(0, MAX_SAVED_MEMES),
-      apiSettings: {
-        giphyApiKey: state.apiSettings.giphyApiKey.trim().slice(0, 128),
-        tenorApiKey: state.apiSettings.tenorApiKey.trim().slice(0, 128),
-        customApiUrl: state.apiSettings.customApiUrl.trim().slice(0, 512),
-      },
-      settings: {
-        theme: state.settings.theme,
-        locale: state.settings.locale,
-      },
-    }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(basePayload))
+    return { ok: true, trimmed: false }
   } catch {
-    // storage quota exceeded — trim favorites gracefully
-    try {
-      const compact: FunMemeState = {
-        ...state,
-        favorites: state.favorites.slice(0, 8),
+    // Storage quota exceeded — progressively trim oldest favorites until it fits
+    const favs = [...basePayload.favorites]
+    while (favs.length > 0) {
+      favs.pop()
+      try {
+        window.localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ ...basePayload, favorites: favs }),
+        )
+        return { ok: true, trimmed: true, keptFavorites: favs }
+      } catch {
+        // continue trimming
       }
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(compact))
-    } catch {
-      // ignore if still unavailable
     }
+    return { ok: false, trimmed: false, reason: 'quota' }
   }
 }
 

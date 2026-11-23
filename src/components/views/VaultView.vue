@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import { t } from '../../lib/i18n'
-import type { Locale, OnlineApiSettings, SavedMemeItem } from '../../lib/storage'
+import { sanitizeExportFilename, type Locale, type OnlineApiSettings, type SavedMemeItem } from '../../lib/storage'
 
 const props = defineProps<{
   locale: Locale
@@ -117,7 +117,7 @@ function handleClearSettings() {
                 type="button"
                 class="btn btn-xs"
                 :title="t(locale, 'vault.download')"
-                @click="emit('export-image', item.dataUrl, `${item.title}.png`)"
+                @click="emit('export-image', item.dataUrl, sanitizeExportFilename(item.title, 'funmeme'))"
               >
                 <AppIcon name="download" :size="11" />
               </button>

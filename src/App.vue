@@ -12,6 +12,7 @@ import {
   addFavoriteItem,
   loadStudioState,
   removeFavoriteItem,
+  sanitizeExportFilename,
   saveStudioState,
   type OnlineApiSettings,
   type ThemeMode,
@@ -74,7 +75,7 @@ function applyTheme(mode: ThemeMode) {
 }
 
 function persist() {
-  saveStudioState({
+  return saveStudioState({
     version: state.version,
     activeView: state.activeView,
     favorites: [...state.favorites],
@@ -173,7 +174,7 @@ async function exportImage(dataUrlOrUrl: string, filename: string) {
     showToast(t(state.settings.locale, 'toast.copyFailed'))
     return
   }
-  const safeName = filename.replace(/[\\/:*?"<>|]/g, '_')
+  const safeName = sanitizeExportFilename(filename, 'funmeme')
   if (window.funmeme?.saveImageDataUrl) {
     const ok = window.funmeme.saveImageDataUrl(safeName, dataUrl)
     if (ok) showToast(`${t(state.settings.locale, 'toast.exported')} (${safeName})`)
@@ -181,7 +182,7 @@ async function exportImage(dataUrlOrUrl: string, filename: string) {
   }
   const a = document.createElement('a')
   a.href = dataUrl
-  a.download = safeName.endsWith('.png') ? safeName : `${safeName}.png`
+  a.download = safeName
   a.click()
   showToast(`${t(state.settings.locale, 'toast.exported')} (${safeName})`)
 }
@@ -239,8 +240,19 @@ function handleSaveFavorite(item: {
   dataUrl: string
   source: 'discover' | 'maker' | 'textmeme' | 'emoji'
 }) {
+  const prev = [...state.favorites]
   state.favorites = addFavoriteItem(state.favorites, item)
-  persist()
+  const res = persist()
+  if (!res.ok && res.reason === 'quota') {
+    state.favorites = prev
+    showToast(t(state.settings.locale, 'toast.storageFull'))
+    return
+  }
+  if (res.trimmed && res.keptFavorites) {
+    state.favorites = res.keptFavorites
+    showToast(t(state.settings.locale, 'toast.storageTrimmed'))
+    return
+  }
   showToast(t(state.settings.locale, 'toast.saved'))
 }
 

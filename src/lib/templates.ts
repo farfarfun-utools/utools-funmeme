@@ -1,4 +1,4 @@
-import { wrapCanvasText } from './text-meme'
+import { fitCanvasTextBlock } from './text-meme'
 
 export type MemeTemplateId =
   | 'panda-think'
@@ -987,33 +987,51 @@ function drawCaptionBlock(
   const clean = text.trim()
   if (!clean) return
   const k = s / 512
-  const fontPx = Math.round(opts.fontSize * k)
+  const isCircle = opts.shape === 'circle'
+  const maxW = isCircle ? s * 0.72 : s * 0.86
+  const maxH = isCircle ? s * 0.3 : s * 0.36
+  const edgePad = isCircle ? 42 * k : 24 * k
+
   ctx.save()
-  ctx.font = `900 ${fontPx}px Impact, "PingFang SC", "Microsoft YaHei", sans-serif`
+  const fit = fitCanvasTextBlock(ctx, clean, {
+    maxWidth: maxW,
+    maxHeight: maxH,
+    initialFontPx: Math.round(opts.fontSize * k),
+    minFontPx: Math.round(16 * k),
+    fontWeight: 900,
+    fontFamily: 'Impact, "PingFang SC", "Microsoft YaHei", sans-serif',
+    lineHeightRatio: 1.18,
+  })
+
   ctx.textAlign = opts.align
   ctx.textBaseline = 'middle'
+  ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.miterLimit = 2
 
-  const maxW = s * 0.86
-  const lines = wrapCanvasText(ctx, clean, maxW)
-  const lh = fontPx * 1.18
-  const x = opts.align === 'left' ? s * 0.07 : opts.align === 'right' ? s * 0.93 : s / 2
+  const insetX = isCircle ? s * 0.14 : s * 0.07
+  const x = opts.align === 'left' ? insetX : opts.align === 'right' ? s - insetX : s / 2
 
+  const minTopY = edgePad + fit.fontPx * 0.56
+  const maxBottomY = s - edgePad - fit.fontPx * 0.56
+  const blockSpan = (fit.lines.length - 1) * fit.lineHeight
   const startY =
     yAnchor === 'top'
-      ? Math.max(fontPx * 0.72, 26 * k + fontPx * 0.52)
-      : s - Math.max(fontPx * 0.72, 26 * k + fontPx * 0.52) - (lines.length - 1) * lh
+      ? Math.min(minTopY, Math.max(minTopY, s * 0.5 - blockSpan - fit.fontPx * 0.5))
+      : Math.max(minTopY, maxBottomY - blockSpan)
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const lineY = startY + i * lh
-    if (opts.strokeWidth > 0) {
+  const scaleRatio = fit.fontPx / Math.max(1, opts.fontSize * k)
+  const effectiveStroke = opts.strokeWidth > 0 ? Math.max(1.5, opts.strokeWidth * scaleRatio) : 0
+
+  for (let i = 0; i < fit.lines.length; i += 1) {
+    const lineY = Math.min(maxBottomY, Math.max(minTopY, startY + i * fit.lineHeight))
+    if (effectiveStroke > 0) {
       ctx.strokeStyle = opts.strokeColor
-      ctx.lineWidth = opts.strokeWidth * 2 * k
-      ctx.strokeText(lines[i], x, lineY)
+      ctx.lineWidth = effectiveStroke * 2 * k
+      ctx.strokeText(fit.lines[i], x, lineY)
     }
     ctx.fillStyle = opts.fillColor
-    ctx.fillText(lines[i], x, lineY)
+    ctx.fillText(fit.lines[i], x, lineY)
   }
   ctx.restore()
 }

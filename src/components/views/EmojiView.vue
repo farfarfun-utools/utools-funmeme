@@ -94,7 +94,17 @@ function handleExportSticker() {
           type="text"
           class="input search-field"
           :placeholder="t(locale, 'emoji.searchPlaceholder')"
+          @keydown.escape="query = ''"
         />
+        <button
+          v-if="query"
+          type="button"
+          class="clear-btn"
+          :aria-label="locale === 'en' ? 'Clear search' : '清空搜索'"
+          @click="query = ''"
+        >
+          <AppIcon name="x" :size="13" />
+        </button>
       </div>
     </div>
 
@@ -195,6 +205,25 @@ function handleExportSticker() {
 .search-field {
   width: 100%;
   padding-left: 30px;
+  padding-right: 28px;
+}
+
+.clear-btn {
+  position: absolute;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.14s, color 0.14s;
+}
+
+.clear-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .cat-strip {

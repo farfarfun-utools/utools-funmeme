@@ -189,7 +189,34 @@ export function buildTextMemeConfig(input: {
   }
 }
 
+export interface FittedTextBlock {
+  lines: string[]
+  fontPx: number
+  lineHeight: number
+  totalHeight: number
+}
+
+function tokenizeParagraph(para: string): string[] {
+  // Keep ASCII/Latin words together when possible while allowing CJK chars and punctuation to wrap cleanly
+  const tokens: string[] = []
+  let asciiBuf = ''
+  for (const ch of Array.from(para)) {
+    if (/[A-Za-z0-9_'-]/.test(ch)) {
+      asciiBuf += ch
+    } else {
+      if (asciiBuf) {
+        tokens.push(asciiBuf)
+        asciiBuf = ''
+      }
+      tokens.push(ch)
+    }
+  }
+  if (asciiBuf) tokens.push(asciiBuf)
+  return tokens
+}
+
 export function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const safeMaxWidth = Math.max(24, maxWidth)
   const paragraphs = text.split(/\r?\n/)
   const lines: string[] = []
   for (const para of paragraphs) {
@@ -197,19 +224,97 @@ export function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxW
       lines.push('')
       continue
     }
+    const tokens = tokenizeParagraph(para)
     let current = ''
-    for (const ch of Array.from(para)) {
-      const next = current + ch
-      if (current && ctx.measureText(next).width > maxWidth) {
-        lines.push(current)
-        current = ch
-      } else {
-        current = next
+    for (const token of tokens) {
+      // Skip leading spaces at start of wrapped line
+      if (!current && /^\s+$/.test(token)) continue
+      const candidate = current + token
+      if (ctx.measureText(candidate).width <= safeMaxWidth) {
+        current = candidate
+        continue
+      }
+      if (current) {
+        lines.push(current.trimEnd())
+        current = ''
+      }
+      if (/^\s+$/.test(token)) continue
+      // Single token fits on a fresh line
+      if (ctx.measureText(token).width <= safeMaxWidth) {
+        current = token
+        continue
+      }
+      // Ultra-long token (e.g. URL or long word): break by character
+      for (const ch of Array.from(token)) {
+        const next = current + ch
+        if (current && ctx.measureText(next).width > safeMaxWidth) {
+          lines.push(current)
+          current = ch
+        } else {
+          current = next
+        }
       }
     }
-    if (current) lines.push(current)
+    if (current.trimEnd()) lines.push(current.trimEnd())
   }
   return lines.length > 0 ? lines : ['']
+}
+
+export function fitCanvasTextBlock(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  opts: {
+    maxWidth: number
+    maxHeight: number
+    initialFontPx: number
+    minFontPx?: number
+    fontWeight?: number | string
+    fontFamily: string
+    lineHeightRatio?: number
+    linePrefix?: string
+  },
+): FittedTextBlock {
+  const minFontPx = Math.max(12, Math.round(opts.minFontPx ?? 16))
+  const weight = opts.fontWeight ?? 900
+  const lhRatio = opts.lineHeightRatio ?? 1.24
+  const prefix = opts.linePrefix ?? ''
+
+  let fontPx = Math.max(minFontPx, Math.round(opts.initialFontPx))
+  let bestLines: string[] = [text]
+  let bestLh = fontPx * lhRatio
+
+  while (fontPx >= minFontPx) {
+    ctx.font = `${weight} ${fontPx}px ${opts.fontFamily}`
+    const prefixW = prefix ? ctx.measureText(prefix).width : 0
+    const availW = Math.max(24, opts.maxWidth - prefixW)
+    const lines = wrapCanvasText(ctx, text, availW)
+    const lh = fontPx * lhRatio
+    const totalH = lines.length * lh
+    bestLines = lines
+    bestLh = lh
+    if (totalH <= opts.maxHeight || fontPx === minFontPx) {
+      break
+    }
+    const step = fontPx > 44 ? 3 : 2
+    fontPx = Math.max(minFontPx, fontPx - step)
+  }
+
+  // Final safety cap if text still exceeds maxHeight at minFontPx
+  const maxLines = Math.max(1, Math.floor(opts.maxHeight / bestLh))
+  if (bestLines.length > maxLines) {
+    const trimmed = bestLines.slice(0, maxLines)
+    const last = trimmed[trimmed.length - 1]
+    trimmed[trimmed.length - 1] = last.length > 1 ? `${last.slice(0, -1)}…` : '…'
+    bestLines = trimmed
+  }
+
+  ctx.font = `${weight} ${fontPx}px ${opts.fontFamily}`
+  return {
+    lines: bestLines,
+    fontPx,
+    lineHeight: bestLh,
+    totalHeight: bestLines.length * bestLh,
+  }
 }
 
 function drawRoundedRect(
@@ -253,28 +358,40 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.strokeStyle = 'rgba(250, 204, 21, 0.35)'
     ctx.lineWidth = 3 * scale
     ctx.strokeRect(18 * scale, 18 * scale, s - 36 * scale, s - 36 * scale)
-    ctx.font = `900 ${fontPx}px "PingFang SC", "Microsoft YaHei", sans-serif`
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: s * 0.8,
+      maxHeight: s * 0.78,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(18 * scale),
+      fontWeight: 900,
+      fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.24,
+    })
     ctx.fillStyle = config.textColor
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const lines = wrapCanvasText(ctx, config.text, s * 0.8)
-    const lh = fontPx * 1.24
-    const startY = s / 2 - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * lh))
+    const startY = s / 2 - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * fit.lineHeight))
   } else if (config.style === 'big-white') {
     ctx.fillStyle = config.bgColor
     ctx.fillRect(0, 0, s, s)
     ctx.strokeStyle = '#111827'
     ctx.lineWidth = 6 * scale
     ctx.strokeRect(16 * scale, 16 * scale, s - 32 * scale, s - 32 * scale)
-    ctx.font = `900 ${fontPx}px "PingFang SC", "Microsoft YaHei", sans-serif`
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: s * 0.8,
+      maxHeight: s * 0.78,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(18 * scale),
+      fontWeight: 900,
+      fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.24,
+    })
     ctx.fillStyle = config.textColor
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const lines = wrapCanvasText(ctx, config.text, s * 0.8)
-    const lh = fontPx * 1.24
-    const startY = s / 2 - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * lh))
+    const startY = s / 2 - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * fit.lineHeight))
   } else if (config.style === 'panda-board') {
     ctx.fillStyle = config.bgColor
     ctx.fillRect(0, 0, s, s)
@@ -322,15 +439,21 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.ellipse(122 * scale, 186 * scale, 24 * scale, 15 * scale, 0, 0, Math.PI * 2)
     ctx.ellipse(390 * scale, 186 * scale, 24 * scale, 15 * scale, 0, 0, Math.PI * 2)
     ctx.fill()
-    // Text on board
-    ctx.font = `900 ${fontPx}px "PingFang SC", "Microsoft YaHei", sans-serif`
+    // Text on board (strictly inside signboard bounds)
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: 368 * scale,
+      maxHeight: 224 * scale,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(16 * scale),
+      fontWeight: 900,
+      fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.24,
+    })
     ctx.fillStyle = config.textColor
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const lines = wrapCanvasText(ctx, config.text, 368 * scale)
-    const lh = fontPx * 1.24
-    const startY = 326 * scale - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, 256 * scale, startY + i * lh))
+    const startY = 326 * scale - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, 256 * scale, startY + i * fit.lineHeight))
   } else if (config.style === 'wechat-bubble') {
     ctx.fillStyle = config.bgColor
     ctx.fillRect(0, 0, s, s)
@@ -359,17 +482,23 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.arc(445 * scale, 194 * scale, 12 * scale, 0.15 * Math.PI, 0.85 * Math.PI)
     ctx.stroke()
 
-    // Measure text for bubble
-    ctx.font = `600 ${fontPx}px "PingFang SC", "Microsoft YaHei", sans-serif`
-    const lines = wrapCanvasText(ctx, config.text, 300 * scale)
-    const lh = fontPx * 1.32
-    const maxLineW = Math.max(...lines.map((l) => ctx.measureText(l).width), 80 * scale)
-    const padX = 28 * scale
-    const padY = 24 * scale
-    const bw = Math.min(344 * scale, maxLineW + padX * 2)
-    const bh = Math.max(78 * scale, lines.length * lh + padY * 2)
+    // Measure text for bubble within safe height
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: 296 * scale,
+      maxHeight: 316 * scale,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(16 * scale),
+      fontWeight: 600,
+      fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.32,
+    })
+    const maxLineW = Math.max(...fit.lines.map((l) => ctx.measureText(l).width), 80 * scale)
+    const padX = 26 * scale
+    const padY = 22 * scale
+    const bw = Math.min(348 * scale, maxLineW + padX * 2)
+    const bh = Math.min(368 * scale, Math.max(78 * scale, fit.totalHeight + padY * 2))
     const bx = 392 * scale - bw
-    const by = Math.max(118 * scale, 256 * scale - bh / 2)
+    const by = Math.max(108 * scale, Math.min(s - bh - 24 * scale, 266 * scale - bh / 2))
 
     // Speech bubble tail
     ctx.fillStyle = '#95EC69'
@@ -386,8 +515,8 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.fillStyle = config.textColor
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
-    const startY = by + bh / 2 - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, bx + padX, startY + i * lh))
+    const startY = by + bh / 2 - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, bx + padX, startY + i * fit.lineHeight))
   } else if (config.style === 'red-gold') {
     const grad = ctx.createLinearGradient(0, 0, 0, s)
     grad.addColorStop(0, '#DC2626')
@@ -422,14 +551,22 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.textBaseline = 'middle'
     ctx.fillText('★ 喜  报 ★', 256 * scale, 77 * scale)
 
-    ctx.font = `900 ${fontPx}px "PingFang SC", "Microsoft YaHei", sans-serif`
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: s * 0.76,
+      maxHeight: 320 * scale,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(18 * scale),
+      fontWeight: 900,
+      fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.26,
+    })
     ctx.fillStyle = config.textColor
     ctx.shadowColor = 'rgba(127, 29, 29, 0.65)'
     ctx.shadowBlur = 8 * scale
-    const lines = wrapCanvasText(ctx, config.text, s * 0.76)
-    const lh = fontPx * 1.26
-    const startY = 304 * scale - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * lh))
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const startY = 300 * scale - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * fit.lineHeight))
   } else if (config.style === 'cyber-neon') {
     ctx.fillStyle = config.bgColor
     ctx.fillRect(0, 0, s, s)
@@ -456,16 +593,22 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.lineWidth = 4 * scale
     ctx.stroke()
 
-    ctx.font = `900 ${fontPx}px "PingFang SC", "Microsoft YaHei", sans-serif`
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: s * 0.78,
+      maxHeight: s * 0.74,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(18 * scale),
+      fontWeight: 900,
+      fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.26,
+    })
     ctx.fillStyle = config.textColor
     ctx.shadowColor = config.textColor
     ctx.shadowBlur = 18 * scale
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const lines = wrapCanvasText(ctx, config.text, s * 0.78)
-    const lh = fontPx * 1.26
-    const startY = s / 2 - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * lh))
+    const startY = s / 2 - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, s / 2, startY + i * fit.lineHeight))
   } else if (config.style === 'sticky-note') {
     ctx.fillStyle = '#E7E5E4'
     ctx.fillRect(0, 0, s, s)
@@ -492,14 +635,20 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.fillStyle = 'rgba(255, 255, 255, 0.62)'
     ctx.fillRect(-66 * scale, -214 * scale, 132 * scale, 38 * scale)
 
-    ctx.font = `800 ${fontPx}px "PingFang SC", "Comic Sans MS", "Microsoft YaHei", sans-serif`
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: 344 * scale,
+      maxHeight: 320 * scale,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(16 * scale),
+      fontWeight: 800,
+      fontFamily: '"PingFang SC", "Comic Sans MS", "Microsoft YaHei", sans-serif',
+      lineHeightRatio: 1.28,
+    })
     ctx.fillStyle = config.textColor
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const lines = wrapCanvasText(ctx, config.text, 344 * scale)
-    const lh = fontPx * 1.28
-    const startY = 8 * scale - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(line, 0, startY + i * lh))
+    const startY = 8 * scale - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(line, 0, startY + i * fit.lineHeight))
     ctx.restore()
   } else if (config.style === 'terminal-err') {
     ctx.fillStyle = '#0B0F19'
@@ -540,13 +689,22 @@ export function renderTextMemeToCanvas(canvas: HTMLCanvasElement, config: TextMe
     ctx.fillStyle = '#F87171'
     ctx.fillText('[WARN] status_code=200_OK_MAYBE', 50 * scale, 150 * scale)
 
-    // Main message
-    ctx.font = `800 ${fontPx}px "SF Mono", "PingFang SC", monospace`
+    // Main message (strictly between header y=176 and footer y=432)
+    const fit = fitCanvasTextBlock(ctx, config.text, {
+      maxWidth: 404 * scale,
+      maxHeight: 244 * scale,
+      initialFontPx: fontPx,
+      minFontPx: Math.round(15 * scale),
+      fontWeight: 800,
+      fontFamily: '"SF Mono", "PingFang SC", monospace',
+      lineHeightRatio: 1.32,
+      linePrefix: '> ',
+    })
     ctx.fillStyle = config.textColor
-    const lines = wrapCanvasText(ctx, config.text, 404 * scale)
-    const lh = fontPx * 1.32
-    const startY = 296 * scale - ((lines.length - 1) * lh) / 2
-    lines.forEach((line, i) => ctx.fillText(`> ${line}`, 50 * scale, startY + i * lh))
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    const startY = 302 * scale - ((fit.lines.length - 1) * fit.lineHeight) / 2
+    fit.lines.forEach((line, i) => ctx.fillText(`> ${line}`, 50 * scale, startY + i * fit.lineHeight))
 
     // Footer prompt
     ctx.font = `600 ${16 * scale}px monospace`

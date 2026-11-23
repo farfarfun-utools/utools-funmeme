@@ -5,10 +5,17 @@ import {
   addFavoriteItem,
   loadStudioState,
   removeFavoriteItem,
+  sanitizeExportFilename,
   saveStudioState,
 } from '../src/lib/storage'
 import { MEME_TEMPLATES, OFFLINE_STARTER_MEMES } from '../src/lib/templates'
-import { buildTextMemeConfig, TEXT_MEME_PRESETS, TEXT_MEME_STYLES } from '../src/lib/text-meme'
+import {
+  buildTextMemeConfig,
+  fitCanvasTextBlock,
+  TEXT_MEME_PRESETS,
+  TEXT_MEME_STYLES,
+  wrapCanvasText,
+} from '../src/lib/text-meme'
 
 describe('FunMeme core libraries', () => {
   beforeEach(() => {
@@ -191,5 +198,74 @@ describe('FunMeme core libraries', () => {
 
     const afterRemove = removeFavoriteItem(reloaded.favorites, reloaded.favorites[0].id)
     expect(afterRemove).toHaveLength(0)
+  })
+
+  it('wraps CJK & English captions cleanly and auto-shrinks long text within bounds', () => {
+    const fakeCtx = {
+      font: '',
+      measureText(this: { font: string }, str: string) {
+        const m = /(\d+)px/.exec(this.font)
+        const px = m ? Number(m[1]) : 32
+        let width = 0
+        for (const ch of Array.from(str)) {
+          width += /[\x20-\x7e]/.test(ch) ? px * 0.56 : px
+        }
+        return { width }
+      },
+    } as unknown as CanvasRenderingContext2D
+
+    // Word-boundary wrapping for English phrases
+    fakeCtx.font = '900 32px sans-serif'
+    const enLines = wrapCanvasText(fakeCtx, 'Production code works please never touch it', 260)
+    expect(enLines.length).toBeGreaterThan(1)
+    expect(enLines.every((l) => fakeCtx.measureText(l).width <= 260)).toBe(true)
+    expect(enLines[0]).not.toMatch(/\s$/)
+
+    // Auto-shrinking long Chinese caption to stay strictly within maxHeight
+    const longZh = '这是一段非常非常长的打工人周报吐槽文案，需要自动换行并且自动缩放字号，绝对不能超出512画布边界！'
+    const fitted = fitCanvasTextBlock(fakeCtx, longZh, {
+      maxWidth: 400,
+      maxHeight: 160,
+      initialFontPx: 64,
+      minFontPx: 16,
+      fontFamily: 'sans-serif',
+      lineHeightRatio: 1.2,
+    })
+    expect(fitted.fontPx).toBeLessThan(64)
+    expect(fitted.totalHeight).toBeLessThanOrEqual(160)
+  })
+
+  it('sanitizes export filenames and reports localStorage quota trimming gracefully', () => {
+    expect(sanitizeExportFilename('  老板/画饼:*?"<>|  ')).toBe('老板_画饼.png')
+    expect(sanitizeExportFilename('...///...')).toBe('funmeme.png')
+    expect(sanitizeExportFilename('///')).toBe('funmeme.png')
+    expect(sanitizeExportFilename('hello world.PNG')).toBe('hello-world.png')
+
+    // Simulate quota exceeded when payload exceeds 500 chars
+    const mem = new Map<string, string>()
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => mem.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (String(v).length > 500) {
+            throw new DOMException('QuotaExceededError')
+          }
+          mem.set(k, String(v))
+        },
+        removeItem: (k: string) => mem.delete(k),
+        clear: () => mem.clear(),
+      },
+    })
+
+    const state = loadStudioState()
+    state.favorites = [
+      { id: '1', title: 'A', dataUrl: `data:image/png;base64,${'A'.repeat(120)}`, source: 'maker', createdAt: 1 },
+      { id: '2', title: 'B', dataUrl: `data:image/png;base64,${'B'.repeat(240)}`, source: 'maker', createdAt: 2 },
+    ]
+    const res = saveStudioState(state)
+    expect(res.ok).toBe(true)
+    expect(res.trimmed).toBe(true)
+    expect(res.keptFavorites).toHaveLength(1)
   })
 })
